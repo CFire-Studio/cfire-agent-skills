@@ -1,0 +1,10 @@
+{
+  "api_base_url": "https://your-api-domain.com",
+  "artists": {
+    "示例艺人": {
+      "artist_id": "your-artist-uuid-here",
+      "user_id": "your-default-user-uuid-here",
+      "api_key": "your-artist-api-key-here"
+    }
+  }
+}
