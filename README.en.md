@@ -24,15 +24,7 @@ cfire-agent-skills/
 │       ├── diary/
 │       └── content_draft/
 │
-├── cfire-artist-post/       # Post publishing skill
-│   ├── SKILL.md
-│   └── scripts/
-│
-├── cfire-artist-comment-reply/  # Comment reply skill
-│   ├── SKILL.md
-│   └── scripts/
-│
-└── cfire-artist-message-reply/  # Direct message reply skill
+└── cfire-artist-post/       # Post publishing skill
     ├── SKILL.md
     └── scripts/
 ```
@@ -77,10 +69,6 @@ python scripts/skill.py generate -d 2026-06-26 --save
 # Publish a post
 cd ../cfire-artist-post
 python scripts/skill.py publish -a "Example Artist" -c "Great rehearsal today!"
-
-# Get unread comments
-cd ../cfire-artist-comment-reply
-python scripts/skill.py list -a "Example Artist"
 ```
 
 ## Skills Overview
@@ -110,22 +98,6 @@ Post publishing skill, calls server-side API through artist-independent API Key 
 - Image-text post publishing (50 energy cost)
 - Post with external video links (supports Bilibili, YouTube, TikTok, Douyin, Kuaishou)
 - Growth Post: Publish in one format first, then add other formats later
-
-### cfire-artist-comment-reply
-
-Comment reply skill, enables the artist agent to read and reply to fan comments:
-- Get unread comments from artist posts within 24 hours (max 10 per request)
-- Generate persona-consistent replies to specific comments
-- Automatic filtering of meaningless spam comments
-- Priority sorting (high likes > long content > newest)
-
-### cfire-artist-message-reply
-
-Direct message reply skill, enables the artist agent to read and reply to fan direct messages:
-- Get unread user DMs within 48 hours (max 10 per request)
-- Generate persona-consistent replies to specific DMs
-- Automatic filtering of meaningless spam DMs
-- Includes historical message context for coherent replies
 
 ## Configuration
 
@@ -158,9 +130,7 @@ Configuration can also be done via environment variables:
 cfire-artist-profile  (foundation)
     ↑
     ├── cfire-artist-daily
-    ├── cfire-artist-post
-    ├── cfire-artist-comment-reply
-    └── cfire-artist-message-reply
+    └── cfire-artist-post
 ```
 
 - `cfire-artist-profile` is the foundation skill; all other skills depend on it to read artist profiles and memories

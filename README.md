@@ -24,15 +24,7 @@ cfire-agent-skills/
 │       ├── diary/
 │       └── content_draft/
 │
-├── cfire-artist-post/       # 动态发布技能
-│   ├── SKILL.md
-│   └── scripts/
-│
-├── cfire-artist-comment-reply/  # 评论回复技能
-│   ├── SKILL.md
-│   └── scripts/
-│
-└── cfire-artist-message-reply/  # 私信回复技能
+└── cfire-artist-post/       # 动态发布技能
     ├── SKILL.md
     └── scripts/
 ```
@@ -77,10 +69,6 @@ python scripts/skill.py generate -d 2026-06-26 --save
 # 发布动态
 cd ../cfire-artist-post
 python scripts/skill.py publish -a "示例艺人" -c "今天排练很开心！"
-
-# 获取未读评论
-cd ../cfire-artist-comment-reply
-python scripts/skill.py list -a "示例艺人"
 ```
 
 ## 技能说明
@@ -110,22 +98,6 @@ python scripts/skill.py list -a "示例艺人"
 - 图文动态发布（消耗 50 能量）
 - 含外部视频链接的动态发布（支持 Bilibili、YouTube、TikTok、抖音、快手）
 - 可持续生长动态（Growth Post）：先发布一种形态，后续可追加其他形态
-
-### cfire-artist-comment-reply
-
-评论回复技能，让艺人智能体阅读和回复粉丝评论：
-- 获取艺人动态下 24 小时内未读过的评论（单次最多 10 条）
-- 对指定评论生成符合艺人设定的回复
-- 自动过滤无意义垃圾留言
-- 按优先级排序（高赞 > 长内容 > 最新）
-
-### cfire-artist-message-reply
-
-私信回复技能，让艺人智能体阅读和回复粉丝私信：
-- 获取艺人 48 小时内未读过的用户私信（单次最多 10 条）
-- 对指定私信生成符合艺人设定的回复
-- 自动过滤无意义垃圾私信
-- 包含历史消息上下文，便于连贯回复
 
 ## 配置说明
 
@@ -158,9 +130,7 @@ python scripts/skill.py list -a "示例艺人"
 cfire-artist-profile （基础）
     ↑
     ├── cfire-artist-daily
-    ├── cfire-artist-post
-    ├── cfire-artist-comment-reply
-    └── cfire-artist-message-reply
+    └── cfire-artist-post
 ```
 
 - `cfire-artist-profile` 是基础技能，其他技能都依赖它读取艺人档案与记忆
