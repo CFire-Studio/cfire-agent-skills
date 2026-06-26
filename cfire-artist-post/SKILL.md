@@ -11,6 +11,7 @@ description: "CFIRE 艺人动态发布技能，通过艺人独立 API Key 鉴权
 - 发布纯文字动态（消耗 10 能量）
 - 发布图文动态（消耗 50 能量）
 - 发布含外部视频链接的动态（消耗 50 能量，支持 Bilibili、YouTube、TikTok、抖音、快手）
+- 发布可持续生长动态（Growth Post）：先以文字/图片/视频任一形态发布，后续可追加其他形态；用户在查看时可在已发布的形态之间切换
 
 ## 核心配置
 
@@ -58,9 +59,27 @@ python scripts/skill.py publish -a "示例艺人" -c "新专辑封面！" -i "co
 
 # 发布含外部视频链接的动态
 python scripts/skill.py publish -a "示例艺人" -c "新视频来了！" -v "https://www.bilibili.com/video/BV1xx411c7mD"
+
+# 发布可持续生长动态（初始为文字形态）
+python scripts/skill.py publish -a "示例艺人" -c "这是一条生长动态" -t growth -f text
+
+# 发布可持续生长动态（初始为图片形态）
+python scripts/skill.py publish -a "示例艺人" -c "新专辑封面！" -i "cover.jpg" -t growth -f image
+
+# 发布可持续生长动态（初始为视频形态）
+python scripts/skill.py publish -a "示例艺人" -c "新视频来了！" -v "https://www.bilibili.com/video/BV1xx411c7mD" -t growth -f video
+
+# 为已有的 growth 动态追加图片形态
+python scripts/skill.py update-form -a "示例艺人" -p "post-uuid" -F image -i "stage.jpg" -s
+
+# 为已有的 growth 动态追加视频形态并设为当前默认展示
+python scripts/skill.py update-form -a "示例艺人" -p "post-uuid" -F video -v "https://www.bilibili.com/video/BV1xx411c7mD" -s
+
+# 更新 growth 动态的文字形态内容（不切换默认展示）
+python scripts/skill.py update-form -a "示例艺人" -p "post-uuid" -F text -c "更新后的文字内容"
 ```
 
-支持的子命令：`publish`
+支持的子命令：`publish`、`update-form`
 
 命令行成功时输出服务端返回的 JSON；失败时错误信息写入 stderr 并以退出码 1 终止。
 
@@ -74,13 +93,22 @@ python scripts/skill.py publish -a "示例艺人" -c "新视频来了！" -v "ht
 
 | HTTP 状态码 | 含义 | 是否可重试 | 建议处理 |
 |------------|------|-----------|---------|
-| **201** | 发布成功 | — | 正常返回 |
-| **400** | 请求参数错误（artist_id / content / user_id 为空等） | **否** | 检查传入参数是否为空或格式错误，修正后重新调用 |
+| **201** | 发布成功（`publish`） | — | 正常返回 |
+| **200** | 更新成功（`update-form`） | — | 正常返回 |
+| **400** | 请求参数错误（artist_id / content / user_id / post_id / form 为空或格式错误等） | **否** | 检查传入参数是否为空或格式错误，修正后重新调用 |
 | **401** | 鉴权失败（API Key 缺失或与 artist_id 不匹配） | **否** | 请用户检查并提供正确的 API Key 和 artist_id 配置，**不要修改代码** |
 | **403** | 能量不足 | **否** | 用户能量不够，重试无效，需先补充能量 |
-| **404** | 用户不存在（user_id 无效） | **否** | 检查 `user_id` 是否正确 |
+| **404** | 用户不存在（`publish`）或动态不存在/无权访问（`update-form`） | **否** | 检查 `user_id` 或 `post_id` 是否正确 |
 | **409** | 重复请求（幂等键冲突） | **否** | 该请求已处理过，可视为成功，无需重试 |
 | **其他** | 服务端异常 | 可酌情重试 1-2 次 | 记录日志后短暂延迟再试，仍失败则上报 |
+
+### Growth Post 能量消耗规则
+
+| 形态 | 能量消耗 | 说明 |
+|------|---------|------|
+| 文字（text） | 10 | 发布或更新文字形态 |
+| 图片（image） | 50 | 发布或更新图片形态 |
+| 视频（video） | 50 | 发布或更新视频形态（仅支持外部嵌入链接） |
 
 **核心原则**：400 / 401 / 403 / 404 / 409 均属于客户端错误或已处理状态，**任何情况下都不应无限重试**，否则会导致日志膨胀、资源浪费或重复扣费。
 

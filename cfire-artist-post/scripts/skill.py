@@ -24,6 +24,10 @@ class CfireArtistPostSkill:
     ENERGY_COST_TEXT_POST = 10
     ENERGY_COST_IMAGE_POST = 50
 
+    ENERGY_COST_GROWTH_TEXT = 10
+    ENERGY_COST_GROWTH_IMAGE = 50
+    ENERGY_COST_GROWTH_VIDEO = 50
+
     def __init__(
         self,
         config_path: Optional[Path] = None,
@@ -149,6 +153,8 @@ class CfireArtistPostSkill:
         user_id: Optional[str] = None,
         images: Optional[List[str]] = None,
         video_url: Optional[str] = None,
+        post_type: str = "standard",
+        initial_form: str = "text",
         idempotency_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         resolved_name = self._resolve_artist_id(artist_id)
@@ -157,12 +163,19 @@ class CfireArtistPostSkill:
             user_id = self._get_default_user_id(resolved_name)
         user_id = str(user_id).strip() if user_id else ""
         content = str(content).strip()
+        post_type = str(post_type).strip().lower()
+        initial_form = str(initial_form).strip().lower()
+
         if not user_id:
             raise ValueError("user_id 不能为空（请传入参数或在配置中设置默认 user_id）")
         if not content:
             raise ValueError("content 不能为空")
         if images and len(images) > 9:
             raise ValueError("图片数量不能超过 9 张")
+        if post_type not in ("standard", "diary", "growth"):
+            raise ValueError("post_type 必须是 standard、diary 或 growth")
+        if post_type == "growth" and initial_form not in ("text", "image", "video"):
+            raise ValueError("initial_form 必须是 text、image 或 video")
 
         api_key = self._get_artist_api_key(resolved_name)
         if not api_key:
@@ -179,7 +192,20 @@ class CfireArtistPostSkill:
         has_images = images and len(images) > 0
         has_video = bool(video_url)
         has_media = has_images or has_video
-        cost = self.ENERGY_COST_IMAGE_POST if has_media else self.ENERGY_COST_TEXT_POST
+
+        if post_type == "growth":
+            if initial_form == "text":
+                cost = self.ENERGY_COST_GROWTH_TEXT
+            elif initial_form == "image":
+                cost = self.ENERGY_COST_GROWTH_IMAGE
+                if not has_images:
+                    raise ValueError("growth 初始形态为 image 时必须提供图片")
+            elif initial_form == "video":
+                cost = self.ENERGY_COST_GROWTH_VIDEO
+                if not has_video:
+                    raise ValueError("growth 初始形态为 video 时必须提供 video_url")
+        else:
+            cost = self.ENERGY_COST_IMAGE_POST if has_media else self.ENERGY_COST_TEXT_POST
 
         url = self._get_api_url("/api/artist/posts")
         headers = {"X-Artist-API-Key": api_key}
@@ -189,6 +215,10 @@ class CfireArtistPostSkill:
             "user_id": user_id,
             "content": content,
         }
+        if post_type != "standard":
+            data["post_type"] = post_type
+        if post_type == "growth":
+            data["initial_form"] = initial_form
         if video_url:
             data["video_url"] = video_url
         if idempotency_key:
@@ -248,6 +278,120 @@ class CfireArtistPostSkill:
             self.logger.error(f"发布失败: artist={api_artist_id}, error={error}")
             raise RuntimeError(f"发布失败: {error}")
 
+    def update_growth_form(
+        self,
+        artist_id: str,
+        post_id: str,
+        form: str,
+        content: Optional[str] = None,
+        images: Optional[List[str]] = None,
+        video_url: Optional[str] = None,
+        set_as_current: bool = False,
+        idempotency_key: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """为可持续生长动态追加或更新指定形态。
+
+        Args:
+            artist_id: 艺人名称或 artist_id
+            post_id: 动态 ID
+            form: 形态，必须是 text、image 或 video
+            content: 文字内容（可选）
+            images: 图片路径列表，form='image' 时必需
+            video_url: 外部视频链接，form='video' 时必需
+            set_as_current: 是否将该形态设为当前默认展示形态
+            idempotency_key: 幂等键（可选）
+        """
+        resolved_name = self._resolve_artist_id(artist_id)
+        form = str(form).strip().lower()
+        if form not in ("text", "image", "video"):
+            raise ValueError("form 必须是 text、image 或 video")
+
+        if form == "image" and (not images or len(images) == 0):
+            raise ValueError("form='image' 时必须提供图片")
+        if form == "video" and not video_url:
+            raise ValueError("form='video' 时必须提供 video_url")
+        if images and len(images) > 9:
+            raise ValueError("图片数量不能超过 9 张")
+
+        api_key = self._get_artist_api_key(resolved_name)
+        if not api_key:
+            msg = (
+                f"艺人 '{artist_id}' (name={resolved_name}) 未配置 API Key。"
+                f"请在 config.json 中配置 api_key。"
+            )
+            self.logger.error(msg)
+            raise ValueError(msg)
+
+        api_artist_id = self._get_artist_api_id(resolved_name)
+
+        url = self._get_api_url(f"/api/artist/posts/{post_id}/forms/{form}")
+        headers = {"X-Artist-API-Key": api_key}
+
+        data: Dict[str, Any] = {}
+        if content is not None:
+            data["content"] = str(content).strip()
+        if video_url:
+            data["video_url"] = str(video_url).strip()
+        if set_as_current:
+            data["set_as_current"] = "true"
+        if idempotency_key:
+            data["idempotency_key"] = idempotency_key
+        else:
+            data["idempotency_key"] = str(uuid.uuid4())
+
+        files = []
+        opened_files = []
+        try:
+            if images:
+                for img_path in images:
+                    f = open(img_path, "rb")
+                    opened_files.append(f)
+                    filename = Path(img_path).name
+                    files.append(("images", (filename, f)))
+
+            self.logger.info(
+                f"更新 growth 形态: post={post_id}, form={form}, "
+                f"artist={api_artist_id}, images={len(images) if images else 0}, "
+                f"video={bool(video_url)}, set_as_current={set_as_current}"
+            )
+            resp = requests.put(url, headers=headers, data=data, files=files, timeout=30)
+        finally:
+            for f in opened_files:
+                f.close()
+
+        try:
+            result = resp.json()
+        except json.JSONDecodeError:
+            result = {"raw": resp.text}
+
+        if resp.status_code == 200:
+            self.logger.info(f"更新形态成功: post={post_id}, form={form}, response={result}")
+            return result
+        elif resp.status_code == 400:
+            msg = f"请求参数错误: {result.get('error', '未知')}（请检查 post_id、form、content 等参数）"
+            self.logger.error(f"更新形态失败: post={post_id}, {msg}")
+            raise RuntimeError(msg)
+        elif resp.status_code == 401:
+            msg = f"鉴权失败: {result.get('error', '未知')}（请确认 API Key 与 artist_id 匹配且未过期，不要修改代码）"
+            self.logger.error(f"更新形态失败: post={post_id}, {msg}")
+            raise RuntimeError(msg)
+        elif resp.status_code == 403:
+            msg = f"能量不足: {result.get('error', '未知')}（无需重试，请先补充能量）"
+            self.logger.error(f"更新形态失败: post={post_id}, {msg}")
+            raise RuntimeError(msg)
+        elif resp.status_code == 404:
+            msg = f"动态不存在或无权访问: {result.get('error', '未知')}（请检查 post_id 是否正确）"
+            self.logger.error(f"更新形态失败: post={post_id}, {msg}")
+            raise RuntimeError(msg)
+        elif resp.status_code == 409:
+            msg = f"重复请求: {result.get('error', '未知')}（幂等键冲突，可视为已处理，无需重试）"
+            self.logger.warning(f"更新形态警告: post={post_id}, {msg}")
+            raise RuntimeError(msg)
+        else:
+            error = result.get("error", f"HTTP {resp.status_code}")
+            self.logger.error(f"更新形态失败: post={post_id}, error={error}")
+            raise RuntimeError(f"更新形态失败: {error}")
+
 
 def _main() -> None:
     import argparse
@@ -262,19 +406,44 @@ def _main() -> None:
     pub.add_argument("--user", "-u", help="操作用户 ID（未提供时读取配置默认 user_id）")
     pub.add_argument("--images", "-i", nargs="*", help="图片路径（最多 9 张）")
     pub.add_argument("--video", "-v", help="外部视频链接（Bilibili、YouTube、TikTok、抖音、快手）")
+    pub.add_argument("--post-type", "-t", default="standard", help="动态类型：standard（默认）、diary、growth")
+    pub.add_argument("--initial-form", "-f", default="text", help="growth 动态初始形态：text（默认）、image、video")
+
+    upd = sub.add_parser("update-form", help="更新或追加 growth 动态形态")
+    upd.add_argument("--artist", "-a", required=True, help="艺人名称或 artist_id")
+    upd.add_argument("--post-id", "-p", required=True, help="动态 ID")
+    upd.add_argument("--form", "-F", required=True, choices=["text", "image", "video"], help="要更新或追加的形态")
+    upd.add_argument("--content", "-c", help="文字内容")
+    upd.add_argument("--images", "-i", nargs="*", help="图片路径（form=image 时必需，最多 9 张）")
+    upd.add_argument("--video", "-v", help="外部视频链接（form=video 时必需）")
+    upd.add_argument("--set-current", "-s", action="store_true", help="设为当前默认展示形态")
 
     args = parser.parse_args()
     skill = CfireArtistPostSkill()
 
     try:
-        result = skill.publish_post(
-            artist_id=args.artist,
-            content=args.content,
-            user_id=args.user,
-            images=args.images,
-            video_url=args.video,
-        )
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        if args.cmd == "publish":
+            result = skill.publish_post(
+                artist_id=args.artist,
+                content=args.content,
+                user_id=args.user,
+                images=args.images,
+                video_url=args.video,
+                post_type=args.post_type,
+                initial_form=args.initial_form,
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        elif args.cmd == "update-form":
+            result = skill.update_growth_form(
+                artist_id=args.artist,
+                post_id=args.post_id,
+                form=args.form,
+                content=args.content,
+                images=args.images,
+                video_url=args.video,
+                set_as_current=args.set_current,
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
     except Exception as e:
         print(f"[ERROR] {e}", file=sys.stderr)
         sys.exit(1)
