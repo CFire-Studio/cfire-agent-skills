@@ -306,6 +306,11 @@ class CfireArtistPostSkill:
         if form not in ("text", "image", "video"):
             raise ValueError("form 必须是 text、image 或 video")
 
+        user_id = self._get_default_user_id(resolved_name)
+        user_id = str(user_id).strip() if user_id else ""
+        if not user_id:
+            raise ValueError("user_id 不能为空（请在配置中设置默认 user_id）")
+
         if form == "image" and (not images or len(images) == 0):
             raise ValueError("form='image' 时必须提供图片")
         if form == "video" and not video_url:
@@ -327,7 +332,9 @@ class CfireArtistPostSkill:
         url = self._get_api_url(f"/api/artist/posts/{post_id}/forms/{form}")
         headers = {"X-Artist-API-Key": api_key}
 
-        data: Dict[str, Any] = {}
+        data: Dict[str, Any] = {
+            "user_id": user_id
+        }
         if content is not None:
             data["content"] = str(content).strip()
         if video_url:

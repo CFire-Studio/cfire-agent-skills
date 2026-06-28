@@ -85,7 +85,7 @@ reference/
 | `REVIEW.md` | 发布前审查 |
 | # 时间线、日程相关内容已迁移至 cfire-artist-daily 技能 |
 
-**加载原则**：稳定层始终最先加载；上下文层按任务类型选择性加载；易变层按需查询 `memory_store` 数据库而非全量读取文件。
+**加载原则**：稳定层始终最先加载；上下文层按任务类型选择性加载；易变层以 Markdown 文件为权威源，`memory_store` 仅作为派生索引提供近期上下文检索（`search.get_recent_context()`）。
 
 ## 工作模式
 
@@ -208,7 +208,7 @@ reference/
 - 需要发布动态时，先完成 `REVIEW.md` 检查
 - 通过检查且用户明确要求发布时，调用 `cfire-artist-post`
 - 图文内容必须确认图片来源、授权和平台适配
-- 发布后建议写入 `TIMELINE.md`，重要事件再提炼至 `MEMORY.md` 或 `REVIEW.md`
+- 发布后建议写入 `cfire-artist-daily` 时间线，重要事件再提炼至 `MEMORY.md` 或 `REVIEW.md`
 - 发布后触发学习循环，评估执行结果
 - 每日日记更新调用 `cfire-artist-daily`：参考人设、目标与过往事件生成 ≤200 字日记，
   保存到 `diary/YYYY-MM-DD.md`（按独立 Schema 校验）与 `memory_store` 时间线，
@@ -216,28 +216,25 @@ reference/
 
 ## 记忆存储与检索 (memory_store)
 
-`memory_store/` 模块提供基于 SQLite 的长周期存储与倒排索引检索能力。
+`memory_store/` 模块提供基于 SQLite 的派生索引与近期上下文检索能力。
+
+**设计原则**：Markdown 文件为权威数据源，SQLite 数据库为派生索引，可随时从 Markdown 重建。
+已移除倒排索引 / FTS / 多关键词检索等过度工程能力，仅保留近期上下文检索。
 
 ### 初始化
 
 ```python
 from memory_store import init
-init()  # 建表 + 从 Markdown 迁移数据
+init()  # 建表 + 从 MEMORY.md 迁移数据
 ```
 
 ### 检索接口
 
 ```python
-from memory_store import search, repository
+from memory_store import search
 
-# 跨表关键词检索
-results = search.search_all("关键词", limit=10)
-
-# 获取近期上下文
+# 获取近期上下文（近期时间线事件 + 高重要性长期记忆）
 context = search.get_recent_context(days=7)
-
-# 多关键词精确检索
-hits = search.search_by_keywords(["词1", "词2"], match_all=False)
 ```
 
 ### 写入接口
@@ -245,7 +242,7 @@ hits = search.search_by_keywords(["词1", "词2"], match_all=False)
 ```python
 from memory_store import repository
 
-# 写入长期记忆
+# 写入长期记忆（派生自 MEMORY.md，由 migration 同步；运行时一般不直接调用）
 memory_id = repository.save_memory(
     category="basic_facts",
     content="...",
@@ -253,7 +250,7 @@ memory_id = repository.save_memory(
     tags=["标签"],
 )
 
-# 写入时间线事件
+# 写入时间线事件（由 cfire-artist-daily 保存日记/内容策划时调用）
 event_id = repository.save_timeline_event(
     event_date="2026-06-15",
     event_type="创作",
@@ -266,10 +263,9 @@ event_id = repository.save_timeline_event(
 
 | 场景 | 推荐方法 |
 | --- | --- |
-| 生成内容前查找相关记忆 | `search.get_recent_context()` |
-| 查找与某主题相关的记忆 | `search.search_all("主题")` |
-| 检查时间线冲突 | `search.search_timeline("关键词", date_from="7天前")` |
-| 多条件精确匹配 | `search.search_by_keywords([...], match_all=True)` |
+| 生成内容前查找近期上下文 | `search.get_recent_context()` |
+| 按日期/类型查询时间线 | `repository.list_timeline_events(event_date_from=..., event_type=...)` |
+| 按重要性查询长期记忆 | `repository.list_memories(min_importance=3)` |
 
 ## 学习循环
 

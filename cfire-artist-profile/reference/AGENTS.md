@@ -7,7 +7,7 @@
 3. `GOALS.md`：当前阶段目标与内容重点。
 4. `IDENTITY.md` 与 `SOUL.md`：人设、价值观、主观性一致。
 5. `CONTENT_STRATEGY.md` 与 `SCHEDULE.md`：内容栏目、节奏和日程事实。
-6. `MEMORY.md` 与 `TIMELINE.md`：长期事实与连续叙事。
+6. `MEMORY.md` 与 `cfire-artist-daily` 时间线：长期事实与连续叙事。
 7. `VOICE_STYLE.md` 与 `FAN_RELATIONSHIP.md`：表达风格与互动边界。
 
 ## 运行原则
@@ -27,20 +27,20 @@
 | --- | --- | --- |
 | 稳定层 | `AGENTS.md`、`BOUNDARIES.md` | 每次任务必读 |
 | 上下文层 | `IDENTITY.md`、`SOUL.md`、`GOALS.md`、`CONTENT_STRATEGY.md`、`VOICE_STYLE.md`、`FAN_RELATIONSHIP.md`、`SCHEDULE.md` | 按任务类型选择性加载 |
-| 易变层 | `MEMORY.md`、`TIMELINE.md`、`REVIEW.md` | 按需查询 `memory_store` |
+| 易变层 | `MEMORY.md`、`REVIEW.md` | 按需查询 `memory_store`；时间线由 `cfire-artist-daily` 维护 |
 
 加载顺序：稳定层 → 上下文层 → 易变层。
 
 ## 记忆写入规则
 
-- **主存储**：所有记忆、时间线事件、粉丝互动、审查复盘均通过 `memory_store` 模块的 repository 接口写入 SQLite 数据库。
-- Markdown 文件作为人类可读摘要，由 SQLite 导出生成，不再作为主存储。
-- `MEMORY.md`：保存长期稳定事实，通过 `repository.save_memory()` 写入。
-- `TIMELINE.md`：保存按时间发生的事件，通过 `repository.save_timeline_event()` 写入。
-- 粉丝个人偏好可写入 `FAN_RELATIONSHIP.md` 和 SQLite `fan_interactions` 表，但不得记录敏感隐私。
-- 错误发布、争议事件、活动事故必须写入 `REVIEW.md` 复盘，同时 `repository.save_review()` 记录到 SQLite。
+- **权威数据源 = Markdown 文件**：`MEMORY.md`、日记/内容策划 Markdown 文件是人类可读、可审计、可手工编辑的权威源。
+- **SQLite 数据库为派生索引**：`memory_store` 仅缓存近期上下文以供检索，不作为主存储；数据库可随时从 Markdown 重建而不丢失信息。
+- `MEMORY.md`：保存长期稳定事实；首次初始化时由 `migration.migrate_memory_md()` 同步到 `memories` 表。
+- 时间线事件：由 `cfire-artist-daily` 保存日记/内容策划时，先写 Markdown 文件（权威），再写 `timeline_events` 表（派生索引）。
+- 粉丝个人偏好可写入 `FAN_RELATIONSHIP.md`，不得记录敏感隐私。
+- 错误发布、争议事件、活动事故必须写入 `REVIEW.md` 复盘（Markdown 为唯一存储）。
 - 候选记忆先以"建议写入"输出，涉及设定变更时必须等待人工确认。
-- 写入记录时自动建立倒排索引，后续可通过 `search.search_all()` 等接口检索。
+- 近期上下文检索统一通过 `search.get_recent_context()` 获取，已移除倒排索引 / FTS / 多关键词检索等过度工程能力。
 
 ## 学习循环规则
 

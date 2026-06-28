@@ -2,13 +2,17 @@
 CFIRE Artist Memory Store
 =========================
 
-基于 SQLite 的虚拟艺人记忆长周期存储与倒排索引检索模块。
+基于 SQLite 的虚拟艺人记忆派生索引模块。
+
+设计原则：Markdown 文件为权威数据源，本模块仅提供派生索引与近期上下文检索。
+- memories 表：派生自 reference/MEMORY.md（由 migration 同步）
+- timeline_events 表：派生自 cfire-artist-daily 的日记/内容策划 Markdown 文件
+  （由 daily 技能保存时同步写入）
 
 提供：
-- 结构化存储：长期记忆、时间线事件、粉丝互动、审查复盘
-- 中文分词：基于 jieba 的中文关键词提取
-- 倒排索引：TF-IDF 加权的关键词检索
-- 迁移工具：从 Markdown 档案文件导入数据
+- 结构化存储：长期记忆、时间线事件
+- 迁移工具：从 MEMORY.md 同步到数据库
+- 近期上下文检索：get_recent_context()
 - 统一 API：面向 Agent Skill 的检索接口
 
 用法：
@@ -17,15 +21,13 @@ CFIRE Artist Memory Store
     # 初始化
     init()
 
-    # 检索
-    results = search.search_all("创作过程")
+    # 获取近期上下文
+    context = search.get_recent_context(days=7)
 """
 
 from . import db
 from . import search
 from . import repository
-from . import inverted_index
-from . import tokenizer
 from . import migration
 
 __all__ = [
@@ -33,11 +35,8 @@ __all__ = [
     "close",
     "search",
     "repository",
-    "inverted_index",
-    "tokenizer",
     "migration",
     "get_stats",
-    "index_record",
 ]
 
 
@@ -59,8 +58,3 @@ def close() -> None:
 def get_stats() -> dict:
     """获取存储统计信息"""
     return repository.get_stats()
-
-
-def index_record(table: str, record_id: int, content: str) -> None:
-    """为一条记录手动建立倒排索引"""
-    inverted_index.index_record(table, record_id, content)

@@ -94,7 +94,7 @@
 
 ## 学习日志格式
 
-学习日志保存在 `memory_store` 的 `learning_log` 表中，同时以摘要形式附加到 `MEMORY.md` 底部。
+学习日志保存在本文件下方的「学习记录」表格中，同时以摘要形式附加到 `MEMORY.md` 底部。
 
 ```markdown
 ## 学习记录
@@ -113,9 +113,9 @@
 
 ## 与 memory_store 的协同
 
-学习循环的存储操作统一通过 `memory_store.repository` 接口：
+学习循环以 Markdown 文件为权威存储：
 
-- 学习候选 → `repository.save_learning_candidate()`
-- 确认写入 → `repository.confirm_learning()`
-- 学习日志 → `repository.save_learning_log()`
-- 周期回顾查询 → `search.search_learning_logs()`
+- 学习候选 → 先以"建议写入"输出，记录在 `MEMORY.md` 或 `REVIEW.md`
+- 确认写入 → 直接编辑对应 Markdown 文件（L2+ 需用户确认）
+- 学习日志 → 记录在上文「学习记录」表格中
+- 周期回顾 → 读取 `MEMORY.md` 与 `cfire-artist-daily` 时间线，必要时用 `search.get_recent_context()` 拉取近期上下文

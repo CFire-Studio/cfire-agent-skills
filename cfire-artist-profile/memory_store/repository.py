@@ -1,15 +1,17 @@
 """
 数据仓库层 (Repository)。
 
-提供对 memories、timeline_events、fan_interactions、reviews 表的 CRUD 操作。
-所有写入操作自动触发倒排索引更新。
+提供对 memories、timeline_events 表的 CRUD 操作。
+
+数据源约定：Markdown 文件为权威数据源，本模块写入的数据库记录为派生索引。
+- memories：由 migration.migrate_memory_md() 从 MEMORY.md 同步
+- timeline_events：由 cfire-artist-daily 保存日记/内容策划时同步写入
 """
 
 import json
 from typing import List, Optional, Dict
 
 from .db import get_cursor
-from . import inverted_index
 
 
 # ============================================================
@@ -33,8 +35,6 @@ def save_memory(
             (category, content, importance, status, tags_json, source_event_id),
         )
         new_id = cur.lastrowid
-
-    inverted_index.index_record("memories", new_id, content)
     return new_id
 
 
@@ -56,11 +56,6 @@ def update_memory(memory_id: int, **fields) -> bool:
             f"UPDATE memories SET {set_clause} WHERE id=?",
             list(updates.values()) + [memory_id],
         )
-
-    # 如果内容变了，重建索引
-    if "content" in fields:
-        inverted_index.remove_record_index("memories", memory_id)
-        inverted_index.index_record("memories", memory_id, fields["content"])
 
     return True
 
@@ -102,7 +97,6 @@ def list_memories(
 
 
 def delete_memory(memory_id: int) -> bool:
-    inverted_index.remove_record_index("memories", memory_id)
     with get_cursor() as cur:
         cur.execute("DELETE FROM memories WHERE id=?", (memory_id,))
         return cur.rowcount > 0
@@ -127,8 +121,6 @@ def save_timeline_event(
             (event_date, event_type, content, mood, extendable_content),
         )
         new_id = cur.lastrowid
-
-    inverted_index.index_record("timeline_events", new_id, content)
     return new_id
 
 
@@ -145,10 +137,6 @@ def update_timeline_event(event_id: int, **fields) -> bool:
             f"UPDATE timeline_events SET {set_clause} WHERE id=?",
             list(updates.values()) + [event_id],
         )
-
-    if "content" in fields:
-        inverted_index.remove_record_index("timeline_events", event_id)
-        inverted_index.index_record("timeline_events", event_id, fields["content"])
 
     return True
 
@@ -193,7 +181,6 @@ def list_timeline_events(
 
 
 def delete_timeline_event(event_id: int) -> bool:
-    inverted_index.remove_record_index("timeline_events", event_id)
     with get_cursor() as cur:
         cur.execute("DELETE FROM timeline_events WHERE id=?", (event_id,))
         return cur.rowcount > 0
@@ -217,83 +204,6 @@ def promote_event_to_memory(event_id: int) -> Optional[int]:
 
 
 # ============================================================
-# Fan Interactions (粉丝互动)
-# ============================================================
-
-def save_fan_interaction(
-    platform: str,
-    fan_identifier: str,
-    content_summary: str,
-    suggested_response: str = "",
-    interaction_value: str = "medium",
-    relation_boundary: str = "safe",
-) -> int:
-    with get_cursor() as cur:
-        cur.execute(
-            """INSERT INTO fan_interactions
-               (platform, fan_identifier, content_summary, suggested_response, interaction_value, relation_boundary)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (platform, fan_identifier, content_summary, suggested_response, interaction_value, relation_boundary),
-        )
-        new_id = cur.lastrowid
-
-    inverted_index.index_record("fan_interactions", new_id, content_summary)
-    return new_id
-
-
-def list_fan_interactions(platform: Optional[str] = None, days: int = 7, limit: int = 50) -> List[Dict]:
-    conditions = ["created_at >= datetime('now', 'localtime', ?)"]
-    params = [f"-{days} days", limit]
-    if platform:
-        conditions.append("platform = ?")
-        params.insert(1, platform)
-
-    where = " AND ".join(conditions)
-    with get_cursor() as cur:
-        cur.execute(f"SELECT * FROM fan_interactions WHERE {where} ORDER BY created_at DESC LIMIT ?", params)
-        return [dict(r) for r in cur.fetchall()]
-
-
-# ============================================================
-# Reviews (审查与复盘)
-# ============================================================
-
-def save_review(
-    review_type: str,
-    content_summary: str,
-    result: str = "",
-    lessons: str = "",
-    action_items: Optional[List[str]] = None,
-) -> int:
-    action_json = json.dumps(action_items or [], ensure_ascii=False)
-    with get_cursor() as cur:
-        cur.execute(
-            """INSERT INTO reviews (review_type, content_summary, result, lessons, action_items)
-               VALUES (?, ?, ?, ?, ?)""",
-            (review_type, content_summary, result, lessons, action_json),
-        )
-        new_id = cur.lastrowid
-
-    search_text = f"{content_summary} {result} {lessons}"
-    inverted_index.index_record("reviews", new_id, search_text)
-    return new_id
-
-
-def list_reviews(review_type: Optional[str] = None, limit: int = 20, offset: int = 0) -> List[Dict]:
-    if review_type:
-        with get_cursor() as cur:
-            cur.execute(
-                "SELECT * FROM reviews WHERE review_type=? ORDER BY reviewed_at DESC LIMIT ? OFFSET ?",
-                (review_type, limit, offset),
-            )
-            return [dict(r) for r in cur.fetchall()]
-    else:
-        with get_cursor() as cur:
-            cur.execute("SELECT * FROM reviews ORDER BY reviewed_at DESC LIMIT ? OFFSET ?", (limit, offset))
-            return [dict(r) for r in cur.fetchall()]
-
-
-# ============================================================
 # 统计信息
 # ============================================================
 
@@ -306,23 +216,7 @@ def get_stats() -> Dict:
         cur.execute("SELECT COUNT(*) FROM timeline_events")
         timeline_count = cur.fetchone()[0]
 
-        cur.execute("SELECT COUNT(*) FROM fan_interactions")
-        fan_count = cur.fetchone()[0]
-
-        cur.execute("SELECT COUNT(*) FROM reviews")
-        review_count = cur.fetchone()[0]
-
-        cur.execute("SELECT COUNT(DISTINCT keyword) FROM inverted_index")
-        keyword_count = cur.fetchone()[0]
-
-        cur.execute("SELECT COUNT(*) FROM inverted_index")
-        index_count = cur.fetchone()[0]
-
     return {
         "memories": memory_count,
         "timeline_events": timeline_count,
-        "fan_interactions": fan_count,
-        "reviews": review_count,
-        "unique_keywords": keyword_count,
-        "total_index_entries": index_count,
     }
