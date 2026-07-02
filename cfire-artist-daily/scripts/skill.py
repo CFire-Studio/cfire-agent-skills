@@ -1,6 +1,6 @@
 """CFIRE 艺人日记与内容策划技能
 
-参考人物设定、目标与过往经历生成每日日记与内容策划（选题 + 拍摄脚本），
+参考人物设定、目标与过往事件生成每日日记与内容策划（选题 + 拍摄脚本），
 并持久化到对应目录与 memory_store，作为后续内容生成的上下文参考。
 """
 
@@ -21,7 +21,7 @@ class CfireArtistDailySkill(CfireSkillBase):
     MAX_DIARY_LENGTH = 200
     DIARY_DIR_NAME = "diary"
     MOOD_ALLOWED = {"开心", "期待", "紧张", "疲惫", "温柔", "平静", "焦虑", "安心", "兴奋", "迷茫"}
-    REQUIRED_SECTIONS = ("## 正文", "## 情绪")
+    REQUIRED_SECTIONS = ("## 正文", "## 情绪", "## 今日目标行动")
 
     def __init__(self, profile_dir: Optional[Path] = None):
         super().__init__(profile_dir=profile_dir, skill_name="cfire_artist_daily")
@@ -36,7 +36,26 @@ class CfireArtistDailySkill(CfireSkillBase):
         event_lines = self._format_recent_events(recent)
         memory_lines = self._format_important_memories(recent)
 
-        prompt = f"""你是艺人。请根据以下人物设定、阶段目标与近期经历，以第一人称撰写 {target_date} 的日常动态文本。
+        prompt = f"""你是艺人。请根据以下人物设定、阶段目标与近期经历，为 {target_date} 生成一份完整的日记。
+
+【输出格式要求】
+严格按以下 Markdown 结构输出，不要添加额外解释或代码块包裹：
+
+# 日记 / {target_date}
+
+## 正文
+<正文内容，第一人称，不超过 200 字，适合直接作为动态发布>
+
+## 情绪
+<情绪标签，从以下选择：开心、期待、紧张、疲惫、温柔、平静、焦虑、安心、兴奋、迷茫>
+
+## 今日目标行动
+<1-2 句，描述今天为推进阶段目标做了什么，或明天计划做什么>
+
+## 元信息
+- 日期：{target_date}
+- 字数：<正文字数统计>
+- 保存时间：<留空>
 
 写作要求：
 1. 描述今天做了什么、看到/听到/遇到什么有趣的小事、自己的心情与感受。
@@ -44,7 +63,8 @@ class CfireArtistDailySkill(CfireSkillBase):
 3. 严格遵循人物设定、语气风格与安全边界，不编造未确认事实、未公开合作或未来活动。
 4. 正文长度不超过 200 字（含标点与空格）。
 5. 用第一人称，语气温柔、克制、清醒，可带轻微诗性，不卖惨、不硬广。
-6. 直接输出正文内容，不要加标题、日期、前缀、解释或引号。
+6. 在正文中自然融入对阶段目标的思考——今天为目标做了什么推进，或明天可以做些什么。
+7. 「今日目标行动」章节要明确关联到当前阶段目标中的具体任务。
 
 【人物设定】
 {files.get('identity', '')[:800]}
@@ -108,7 +128,7 @@ class CfireArtistDailySkill(CfireSkillBase):
     def _file_path_for(self, target_date: str) -> Path:
         return self.diary_dir / f"{target_date}.md"
 
-    def _render_diary_file(self, target_date: str, content: str, mood: str) -> str:
+    def _render_diary_file(self, target_date: str, content: str, mood: str, goal_action: str = "") -> str:
         from datetime import datetime
         saved_at = datetime.now().replace(microsecond=0).isoformat()
         return (
@@ -120,14 +140,17 @@ class CfireArtistDailySkill(CfireSkillBase):
             "## 情绪\n"
             f"{mood}\n"
             "\n"
+            "## 今日目标行动\n"
+            f"{goal_action or '（暂无）'}\n"
+            "\n"
             "## 元信息\n"
             f"- 日期：{target_date}\n"
             f"- 字数：{len(content)}\n"
             f"- 保存时间：{saved_at}\n"
         )
 
-    def _parse_diary_file(self, path: Path) -> Dict[str, Any]:
-        text = path.read_text(encoding="utf-8")
+    def _parse_diary_content(self, text: str, source_path: Optional[str] = None) -> Dict[str, Any]:
+        """解析日记 Markdown 内容，支持从文件或字符串解析。"""
         sections: Dict[str, str] = {}
         current = None
         buf: List[str] = []
@@ -143,34 +166,61 @@ class CfireArtistDailySkill(CfireSkillBase):
         if current:
             sections[current] = "\n".join(buf).strip()
 
-        for key in ("正文", "情绪"):
+        for key in ("正文", "情绪", "今日目标行动"):
             if key not in sections:
                 raise ValueError(f"日记文件缺少必需章节: ## {key}")
-
-        # 从文件名或元信息中提取日期
-        date_from_file = path.stem
-        # 从元信息中提取日期（如果存在）
-        date_from_meta = date_from_file
+        
+        date_from_meta = ""
         if "元信息" in sections:
             for line in sections["元信息"].splitlines():
                 if line.startswith("- 日期："):
                     date_from_meta = line[len("- 日期："):].strip()
-
-        return {
+        
+        result = {
             "date": date_from_meta,
             "mood": sections["情绪"],
             "content": sections["正文"],
+            "goal_action": sections["今日目标行动"],
             "length": len(sections["正文"]),
-            "path": str(path),
         }
+        if source_path:
+            result["path"] = source_path
+        return result
+
+    def _parse_diary_file(self, path: Path) -> Dict[str, Any]:
+        """读取并解析日记文件。"""
+        text = path.read_text(encoding="utf-8")
+        result = self._parse_diary_content(text, str(path))
+        if not result["date"]:
+            result["date"] = path.stem
+        return result
 
     def validate(self, content: str, target_date: Optional[str] = None,
                  mood: Optional[str] = None) -> Dict[str, Any]:
         """按独立 Schema 校验日记元数据与正文。"""
         target = self._validate_date(target_date or date.today().isoformat())
+        
+        if "## 正文" in content:
+            parsed = self._parse_diary_content(content)
+            parsed_content = parsed["content"]
+            parsed_mood = parsed["mood"]
+            goal_action = parsed.get("goal_action", "")
+            
+            self._validate_content(parsed_content)
+            self._validate_mood(parsed_mood)
+            
+            return {
+                "date": target,
+                "mood": parsed_mood,
+                "content": parsed_content,
+                "goal_action": goal_action,
+                "length": len(parsed_content),
+                "is_full_format": True,
+            }
+        
         mood = self._validate_mood(mood or self._extract_mood(content))
         content = self._validate_content(content)
-        return {"date": target, "mood": mood, "content": content, "length": len(content)}
+        return {"date": target, "mood": mood, "content": content, "length": len(content), "is_full_format": False}
 
     def read(self, target_date: str) -> Dict[str, Any]:
         """读取指定日期的日记文件。"""
@@ -185,23 +235,23 @@ class CfireArtistDailySkill(CfireSkillBase):
         target_date: Optional[str] = None,
         use_llm: bool = True,
     ) -> Dict[str, Any]:
-        """生成日记。若配置 LLM 则自动产出正文，否则返回 prompt。"""
+        """生成日记。若配置 LLM 则自动产出完整日记，否则返回 prompt。"""
         target = target_date or date.today().isoformat()
         context = self._load_context()
         prompt = self.build_prompt(context, target)
         content = ""
         source = "prompt"
         if use_llm:
-            raw = self._call_llm(prompt, max_tokens=300, temperature=0.8)
+            raw = self._call_llm(prompt, max_tokens=400, temperature=0.8)
             if raw:
-                content = self._truncate_to_limit(self._clean_output(raw))
+                content = self._clean_output(raw)
                 source = "llm"
         if not content:
             return {"date": target, "content": "", "source": source,
                     "prompt": prompt, "saved": False,
                     "error": "未配置 LLM 或生成失败，已返回 prompt，可人工填写后调用 save。"}
-        return {"date": target, "content": content, "mood": self._extract_mood(content),
-                "length": len(content), "source": source, "prompt": prompt, "saved": False}
+        return {"date": target, "content": content, "source": source,
+                "prompt": prompt, "saved": False}
 
     def _extract_mood(self, text: str) -> str:
         """基于简单关键词提取情绪标签，优先返回允许列表中的值。"""
@@ -221,26 +271,33 @@ class CfireArtistDailySkill(CfireSkillBase):
         target_date: Optional[str] = None,
         mood: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """按独立 Schema 保存日记：独立 Markdown 文件 + memory_store 时间线事件。"""
+        """按独立 Schema 保存日记：独立 Markdown 文件 + memory_store 时间线。"""
         validated = self.validate(content=content, target_date=target_date, mood=mood)
         target = validated["date"]
         content = validated["content"]
         mood = validated["mood"]
+        goal_action = validated.get("goal_action", "")
 
         path = self._file_path_for(target)
-        path.write_text(self._render_diary_file(target, content, mood), encoding="utf-8")
+        
+        if validated.get("is_full_format"):
+            path.write_text(content, encoding="utf-8")
+        else:
+            path.write_text(self._render_diary_file(target, content, mood, goal_action), encoding="utf-8")
 
         from memory_store import init, repository
         init()
+        extendable_content = "可作为后续日常动态、创作手记与粉丝互动的参考"
+        if goal_action:
+            extendable_content += f" | 今日目标行动：{goal_action}"
         event_id = repository.save_timeline_event(
             event_date=target, event_type="日记", content=content, mood=mood,
-            extendable_content="可作为后续日常动态、创作手记与粉丝互动的参考",
-        )
+            extendable_content=extendable_content)
 
         self.logger.info(f"日记已保存: date={target}, event_id={event_id}, length={len(content)}")
         return {
             "date": target, "content": content, "mood": mood, "length": len(content),
-            "event_id": event_id, "diary_path": str(path), "saved": True,
+            "goal_action": goal_action, "event_id": event_id, "diary_path": str(path), "saved": True,
         }
 
     def list_files(self, limit: int = 10) -> List[Dict[str, Any]]:
@@ -268,7 +325,7 @@ def _build_parser() -> argparse.ArgumentParser:
     gen.add_argument("--no-llm", action="store_true", help="不调用 LLM，仅输出生成 prompt")
     gen.add_argument("--save", action="store_true", help="生成成功后立即保存")
 
-    save = sub.add_parser("save", help="保存已有的日记内容")
+    save = sub.add_parser("save", help="保存已有日记内容")
     save.add_argument("--profile-dir", "-p", help="cfire-artist-profile 目录路径")
     save.add_argument("--date", "-d", help="日记日期，默认今天（YYYY-MM-DD）")
     save.add_argument("--mood", "-m", help="情绪标签，默认自动提取")
@@ -295,7 +352,7 @@ def _build_parser() -> argparse.ArgumentParser:
     draft_gen.add_argument("--no-llm", action="store_true", help="不调用 LLM，仅输出生成 prompt")
     draft_gen.add_argument("--save", action="store_true", help="生成成功后立即保存")
 
-    draft_save = sub.add_parser("draft-save", help="保存已有的内容策划")
+    draft_save = sub.add_parser("draft-save", help="保存已有内容策划")
     draft_save.add_argument("--profile-dir", "-p", help="cfire-artist-profile 目录路径")
     draft_save.add_argument("--date", "-d", help="策划日期，默认今天（YYYY-MM-DD）")
     draft_save.add_argument("--content", "-c", required=True, help="内容策划正文（Markdown）")
@@ -317,16 +374,16 @@ def _run_diary_cmd(args, skill: CfireArtistDailySkill) -> None:
         result = skill.generate(target_date=args.date, use_llm=not args.no_llm)
         if result.get("content") and args.save:
             result.update(skill.save(content=result["content"], target_date=result["date"],
-                                       mood=result.get("mood")))
+                                     mood=result.get("mood")))
         print(json.dumps(result, ensure_ascii=False, indent=2))
     elif args.cmd == "save":
         print(json.dumps(skill.save(content=args.content, target_date=args.date,
-                                      mood=args.mood), ensure_ascii=False, indent=2))
+                                    mood=args.mood), ensure_ascii=False, indent=2))
     elif args.cmd == "read":
         print(json.dumps(skill.read(args.date), ensure_ascii=False, indent=2))
     elif args.cmd == "validate":
         print(json.dumps(skill.validate(content=args.content, target_date=args.date,
-                                          mood=args.mood), ensure_ascii=False, indent=2))
+                                        mood=args.mood), ensure_ascii=False, indent=2))
     elif args.cmd == "list":
         items = skill.list_files(limit=args.limit)
         print(json.dumps({"items": items, "source": "diary_dir"}, ensure_ascii=False, indent=2))
@@ -341,13 +398,13 @@ def _run_draft_cmd(args, skill: CfireContentDraftSkill) -> None:
         print(json.dumps(result, ensure_ascii=False, indent=2))
     elif args.cmd == "draft-save":
         print(json.dumps(skill.save(content=args.content, target_date=args.date),
-                          ensure_ascii=False, indent=2))
+                         ensure_ascii=False, indent=2))
     elif args.cmd == "draft-read":
         print(json.dumps(skill.read(args.date), ensure_ascii=False, indent=2))
     elif args.cmd == "draft-list":
         items = skill.list_files(limit=args.limit)
         print(json.dumps({"items": items, "source": "content_draft_dir"},
-                          ensure_ascii=False, indent=2))
+                         ensure_ascii=False, indent=2))
 
 
 def _main() -> None:

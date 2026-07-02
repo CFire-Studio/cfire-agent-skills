@@ -64,6 +64,9 @@ class CfireContentDraftSkill(CfireSkillBase):
 ### 与过往内容的呼应
 <描述与最近内容的连续性；如无呼应则写"无">
 
+### 与阶段目标的关联
+<明确说明本选题如何呼应或推进当前阶段目标中的具体任务>
+
 ### 预期情绪价值
 <一句话说明希望给粉丝带来的情绪价值>
 
@@ -104,11 +107,13 @@ class CfireContentDraftSkill(CfireSkillBase):
 
 【创作约束】
 1. 选题必须符合艺人的独立音乐人人设：温柔、克制、清醒、有创作锋芒。
-2. 优先延续最近 3-7 天时间线；可以偶尔与之前内容呼应，但不要强行重复。
-3. 不编造未确认事实、未公开合作、未来活动或线下见面。
-4. 拍摄脚本至少包含 2 个镜头，每个镜头必须包含：景别、光线、音效、画面、人物台词。
-5. 如选题涉及 Cosplay，必须在「角色妆造」章节详细说明角色选择理由、服装、妆容和场景搭配；拍摄脚本的人物描述需呼应妆造细节。
-6. 台词可中可英，英语台词需注明（标准美式英语）。
+2. 选题必须呼应当前阶段目标中的至少一项具体行动，明确说明内容与目标的关联。
+3. 优先延续最近 3-7 天时间线；可以偶尔与之前内容呼应，但不要强行重复。
+4. 不编造未确认事实、未公开合作、未来活动或线下见面。
+5. 拍摄脚本至少包含 2 个镜头，每个镜头必须包含：景别、光线、音效、画面、人物台词。
+6. 台词风格遵循 VOICE_STYLE：温柔、克制、清醒、轻微诗性，不卖惨、不硬广。
+7. 如选题涉及 Cosplay，必须在「角色妆造」章节详细说明角色选择理由、服装、妆容和场景搭配；拍摄脚本的人物描述需呼应妆造细节。
+8. 台词可中可英，英语台词需注明（标准美式英语）。
 
 【短视频制作技巧——三幕结构】
 拍摄脚本需遵循以下短视频叙事结构，确保内容在开头即抓住注意力：
@@ -209,6 +214,10 @@ class CfireContentDraftSkill(CfireSkillBase):
                     f"内容支柱 '{pillar}' 不在允许列表中，允许: {sorted(self.CONTENT_PILLARS)}"
                 )
 
+        goal_link_match = re.search(r"### 与阶段目标的关联\s*\n([^\n]+)", content)
+        if not goal_link_match or not goal_link_match.group(1).strip():
+            raise ValueError("选题策划缺少「与阶段目标的关联」章节或内容为空")
+
         shot_count = len(re.findall(r"\[镜头 \d+\]", content))
         if shot_count < 2:
             raise ValueError(f"拍摄脚本至少需要 2 个镜头，当前: {shot_count}")
@@ -273,9 +282,14 @@ class CfireContentDraftSkill(CfireSkillBase):
                 raise ValueError(f"内容策划文件缺少必需章节: ## {key}")
 
         shot_count = len(re.findall(r"\[镜头 \d+\]", sections.get("拍摄脚本", "")))
+        
+        goal_link_match = re.search(r"### 与阶段目标的关联\s*\n([^\n]+)", sections.get("选题策划", ""))
+        goal_link = goal_link_match.group(1).strip() if goal_link_match else ""
+        
         result = {
             "date": sections["日期"],
             "topic_planning": sections["选题策划"],
+            "goal_link": goal_link,
             "shooting_script": sections["拍摄脚本"],
             "shot_count": shot_count,
             "length": len(text),
